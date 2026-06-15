@@ -174,6 +174,11 @@
       background: #f3ffd8;
     }
 
+    .animal-choice:disabled {
+      cursor: wait;
+      opacity: 0.72;
+    }
+
     /* 当前小动物：后续替换 PNG 时，换 data-animals 或同名图片即可。 */
     .animal {
       position: absolute;
@@ -520,6 +525,29 @@
       pointer-events: none;
     }
 
+    .asset-status {
+      position: absolute;
+      left: 50%;
+      bottom: 17.2%;
+      z-index: 11;
+      transform: translateX(-50%);
+      padding: 0.7vw 1.15vw;
+      border-radius: 999px;
+      background: rgba(255, 252, 229, 0.92);
+      border: 0.18vw solid rgba(96, 116, 41, 0.24);
+      color: #253318;
+      font-size: clamp(14px, 1.2vw, 24px);
+      font-weight: 800;
+      box-shadow: 0 0.28vw 0 rgba(65, 75, 28, 0.15);
+      transition: opacity 240ms ease, transform 240ms ease;
+      pointer-events: none;
+    }
+
+    .lesson.assets-ready .asset-status {
+      opacity: 0;
+      transform: translateX(-50%) translateY(0.5vw);
+    }
+
     /* A 按钮：推开它。 */
     .choice-button {
       min-height: clamp(72px, 7vw, 132px);
@@ -543,6 +571,13 @@
 
     .choice-button:active {
       transform: translateY(0.22vw);
+    }
+
+    .choice-button:disabled {
+      cursor: wait;
+      filter: grayscale(0.16) brightness(0.92);
+      opacity: 0.72;
+      transform: none;
     }
 
     .choice-button strong {
@@ -870,19 +905,19 @@
 
       <!-- 角色素材：这里预留五只小动物，后续可替换为同名 PNG 或修改 JS 里的 animals 数组。 -->
       <nav class="animal-picker" aria-label="选择当前小动物">
-        <button class="animal-choice is-selected" type="button" data-animal="lion" aria-label="狮子">
+        <button class="animal-choice is-selected" type="button" data-animal="lion" aria-label="狮子" disabled>
           <img src="transparent_assets/狮子_透明.png" alt="">
         </button>
-        <button class="animal-choice" type="button" data-animal="monkey" aria-label="猴子">
+        <button class="animal-choice" type="button" data-animal="monkey" aria-label="猴子" disabled>
           <img src="transparent_assets/猴子_透明.png" alt="">
         </button>
-        <button class="animal-choice" type="button" data-animal="warthog" aria-label="疣猪">
+        <button class="animal-choice" type="button" data-animal="warthog" aria-label="疣猪" disabled>
           <img src="transparent_assets/疣猪_透明.png" alt="">
         </button>
-        <button class="animal-choice" type="button" data-animal="mouse" aria-label="小老鼠">
+        <button class="animal-choice" type="button" data-animal="mouse" aria-label="小老鼠" disabled>
           <img src="transparent_assets/小老鼠_透明.png" alt="">
         </button>
-        <button class="animal-choice" type="button" data-animal="bird" aria-label="小鸟">
+        <button class="animal-choice" type="button" data-animal="bird" aria-label="小鸟" disabled>
           <img src="transparent_assets/小鸟_透明.png" alt="">
         </button>
       </nav>
@@ -907,12 +942,14 @@
       </div>
       <div class="path-glow" aria-hidden="true"></div>
 
+      <div class="asset-status" id="assetStatus" role="status" aria-live="polite">素材准备中...</div>
+
       <div class="choice-panel" id="choicePanel">
-        <button class="choice-button choice-a-button" type="button" id="choiceA">
+        <button class="choice-button choice-a-button" type="button" id="choiceA" disabled>
           <strong>A</strong>
           推开它
         </button>
-        <button class="choice-button choice-b-button" type="button" id="choiceB">
+        <button class="choice-button choice-b-button" type="button" id="choiceB" disabled>
           <strong>B</strong>
           说：“请你让一让。”
         </button>
@@ -1091,6 +1128,7 @@
     const feedbackAction = document.getElementById("feedbackAction");
     const feedbackSecondaryAction = document.getElementById("feedbackSecondaryAction");
     const animalChoices = document.querySelectorAll(".animal-choice");
+    const assetStatus = document.getElementById("assetStatus");
 
     const hippoStates = {
       sleeping: {
@@ -1151,6 +1189,8 @@
 
     let activeAnimalKey = "lion";
     let timers = [];
+    let assetsAreReady = false;
+    const preloadedAssets = new Map();
 
     const actionClasses = ["is-roaring", "is-pushing", "is-charging", "is-reminding", "is-thinking"];
     const forceActionTypes = ["roar", "push", "charge"];
@@ -1168,10 +1208,68 @@
     }
 
     function setButtonsDisabled(isDisabled) {
-      choiceA.disabled = isDisabled;
-      choiceB.disabled = isDisabled;
+      const shouldDisable = isDisabled || !assetsAreReady;
+      choiceA.disabled = shouldDisable;
+      choiceB.disabled = shouldDisable;
       animalChoices.forEach((button) => {
-        button.disabled = isDisabled;
+        button.disabled = shouldDisable;
+      });
+    }
+
+    function collectAssetSources() {
+      const sources = new Set(["背景图_无河马.png"]);
+
+      Object.values(animals).forEach((animalInfo) => {
+        sources.add(animalInfo.idleSrc);
+        sources.add(animalInfo.actionSrc);
+        sources.add(animalInfo.pushSrc);
+      });
+
+      Object.values(hippoStates).forEach((state) => {
+        sources.add(state.src);
+      });
+
+      return Array.from(sources).filter(Boolean);
+    }
+
+    function preloadImage(src) {
+      if (preloadedAssets.has(src)) {
+        return preloadedAssets.get(src);
+      }
+
+      const promise = new Promise((resolve) => {
+        const image = new Image();
+
+        image.onload = () => {
+          const decode = image.decode ? image.decode().catch(() => null) : Promise.resolve();
+          decode.then(() => resolve({ src, ok: true }));
+        };
+
+        image.onerror = () => resolve({ src, ok: false });
+        image.src = src;
+      });
+
+      preloadedAssets.set(src, promise);
+      return promise;
+    }
+
+    // 线上访问时动作 PNG 首次下载较慢；先预加载，避免点 A/B 后气泡先出、动作图还没显示。
+    function preloadLessonAssets() {
+      const sources = collectAssetSources();
+      let loadedCount = 0;
+
+      setButtonsDisabled(true);
+      assetStatus.textContent = `素材准备中 0/${sources.length}`;
+
+      Promise.all(sources.map((src) => preloadImage(src).then((result) => {
+        loadedCount += 1;
+        assetStatus.textContent = `素材准备中 ${loadedCount}/${sources.length}`;
+        return result;
+      }))).then(() => {
+        assetsAreReady = true;
+        lesson.classList.add("assets-ready");
+        assetStatus.textContent = "素材已准备好";
+        setButtonsDisabled(false);
       });
     }
 
@@ -1371,7 +1469,7 @@
     function resetScene() {
       clearTimers();
       hippoImage.style.transition = "none";
-      lesson.className = "lesson";
+      lesson.className = assetsAreReady ? "lesson assets-ready" : "lesson";
       clearAnimalActionClasses();
       clearGroupPush();
       speechBubble.textContent = "请你让一让，好吗？";
@@ -1516,6 +1614,7 @@
     });
 
     resetScene();
+    preloadLessonAssets();
   </script>
 </body>
 </html>
